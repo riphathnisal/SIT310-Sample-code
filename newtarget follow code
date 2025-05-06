@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+
+import rospy
+from duckietown_msgs.msg import Twist2DStamped
+from duckietown_msgs.msg import AprilTagDetectionArray
+
+class Target_Follower:
+    def __init__(self):
+        # Initialize ROS node
+        rospy.init_node('target_follower_node', anonymous=True)
+
+        # Clean shutdown behavior
+        rospy.on_shutdown(self.clean_shutdown)
+
+        # Publisher: sends velocity commands
+        self.cmd_vel_pub = rospy.Publisher('/birdie/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
+
+        # Subscriber: receives AprilTag detections
+        rospy.Subscriber('/birdie/apriltag_detector_node/detections', AprilTagDetectionArray, self.tag_callback, queue_size=1)
+
+        rospy.spin()
+
+    # Callback for AprilTag detections
+    def tag_callback(self, msg):
+        self.move_robot(msg.detections)
+
+    # Clean shutdown: stop the robot
+    def clean_shutdown(self):
+        rospy.loginfo("System shutting down. Stopping robot...")
+        self.stop_robot()
+
+    # Publish zero velocity to stop the robot
+    def stop_robot(self):
+        cmd_msg = Twist2DStamped()
+        cmd_msg.header.stamp = rospy.Time.now()
+        cmd_msg.v = 0.0
+        cmd_msg.omega = 0.0
+        self.cmd_vel_pub.publish(cmd_msg)
+
+    # Main control logic
+    def move_robot(self, detections):
+        cmd_msg = Twist2DStamped()
+        cmd_msg.header.stamp = rospy.Time.now()
+
+        # --- Seek Mode: No tag detected ---
+        if len(detections) == 0:
+            rospy.loginfo("No tag detected. Seeking...")
+            cmd_msg.v = 0.0
+            cmd_msg.omega = 8.5  # Rotate in place to search
+            self.cmd_vel_pub.publish(cmd_msg)
+            return
+
+        # --- Stare Mode: Tag detected ---
+        # Get the first detection's position
+        transform = detections[0].transform.translation
+        x = transform.x  # lateral offset (left-right)
+        y = transform.y  # vertical offset (up-down)
+        z = transform.z  # depth (distance to tag)
+
+        rospy.loginfo("Tag detected. Staring at it. x: %.3f, y: %.3f, z: %.3f", x, y, z)
+
+        # Stop all motion
+        cmd_msg.v = 0.0
+        cmd_msg.omega = 0.0
+        self.cmd_vel_pub.publish(cmd_msg)
+
+if __name__ == '__main__':
+    try:
+        target_follower = Target_Follower()
+    except rospy.ROSInterruptException:
+        pass
