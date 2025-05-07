@@ -14,8 +14,8 @@ class Target_Follower:
 
         # Control parameters
         self.Kp = 4.5           # Proportional gain
-        self.omega_min = 5.0    # Minimum omega to overcome friction
-        self.omega_max = 12.0    # Cap omega
+        self.omega_min = 2.0    # Minimum omega to overcome friction
+        self.omega_max = 6.0    # Cap omega
 
         rospy.spin()
 
@@ -41,7 +41,7 @@ class Target_Follower:
         if len(detections) == 0:
             rospy.loginfo("No tag detected. Seeking...")
             cmd_msg.v = 0.0
-            cmd_msg.omega = 8.5  # Spin to find tag
+            cmd_msg.omega = 5.0  # Spin to find tag
             self.cmd_vel_pub.publish(cmd_msg)
             return
 
