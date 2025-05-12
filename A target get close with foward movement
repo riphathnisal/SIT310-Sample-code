@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+import rospy
+from duckietown_msgs.msg import Twist2DStamped
+from duckietown_msgs.msg import AprilTagDetectionArray
+
+class Target_Follower:
+    def __init__(self):
+        rospy.init_node('target_follower_node', anonymous=True)
+        rospy.on_shutdown(self.clean_shutdown)
+        self.cmd_vel_pub = rospy.Publisher('/birdie/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
+        rospy.Subscriber('/birdie/apriltag_detector_node/detections', AprilTagDetectionArray, self.tag_callback, queue_size=1)
+        
+        # Control parameters
+        self.rotation_kp = 2.0       # Proportional gain for angular control
+        self.forward_kp = 1.0        # Proportional gain for forward motion
+        self.rotation_margin = 0.05  # How close to center (x-axis) is considered "centered"
+        self.distance_target = 0.4   # Desired distance to keep from tag (in meters)
+        self.distance_margin = 0.05  # Allowable margin from desired distance
+        self.max_speed = 0.4         # Maximum forward speed
+        
+        rospy.spin()
+        
+    def tag_callback(self, msg):
+        self.move_robot(msg.detections)
+        
+    def clean_shutdown(self):
+        rospy.loginfo("Shutting down. Stopping robot...")
+        self.stop_robot()
+        
+    def stop_robot(self):
+        cmd_msg = Twist2DStamped()
+        cmd_msg.header.stamp = rospy.Time.now()
+        cmd_msg.v = 0.0
+        cmd_msg.omega = 0.0
+        self.cmd_vel_pub.publish(cmd_msg)
+        
+    def move_robot(self, detections):
+        cmd_msg = Twist2DStamped()
+        cmd_msg.header.stamp = rospy.Time.now()
+        cmd_msg.v = 0.0
+        cmd_msg.omega = 0.0
+        
+        if len(detections) == 0:
+            rospy.loginfo("No tag detected. Staying still.")
+            self.cmd_vel_pub.publish(cmd_msg)
+            return
+        
+        # Use the closest tag (smallest z = depth)
+        closest_tag = min(detections, key=lambda tag: tag.transform.translation.z)
+        x = closest_tag.transform.translation.x  # left/right
+        z = closest_tag.transform.translation.z  # forward/backward (distance)
+
+        rospy.loginfo("Tag detected - x: %.3f m, z: %.3f m", x, z)
+
+        # Angular velocity to rotate toward center
+        if abs(x) > self.rotation_margin:
+            cmd_msg.omega = self.rotation_kp * x
+        else:
+            cmd_msg.omega = 0.0
+
+        # Forward velocity to approach desired distance
+        distance_error = z - self.distance_target
+        if abs(distance_error) > self.distance_margin:
+            cmd_msg.v = self.forward_kp * distance_error
+            cmd_msg.v = max(min(cmd_msg.v, self.max_speed), -self.max_speed)
+        else:
+            cmd_msg.v = 0.0  # Close enough to target
+
+        rospy.loginfo("Sending command: v = %.2f, omega = %.2f", cmd_msg.v, cmd_msg.omega)
+        self.cmd_vel_pub.publish(cmd_msg)
+
+if __name__ == '__main__':
+    try:
+        Target_Follower()
+    except rospy.ROSInterruptException:
+        pass
